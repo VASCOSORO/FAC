@@ -7,6 +7,7 @@ from io import BytesIO
 
 # Ruta del archivo CSV en el repositorio
 CSV_FILE = "1804no.csv"
+LOGO_FILE = "logomundo3.png"
 
 # Función para cargar el archivo CSV
 @st.cache
@@ -74,6 +75,16 @@ def generar_catalogo(productos, df_productos):
     st.download_button("Descargar Catálogo", data=buffer, file_name="catalogo.png", mime="image/png")
 
 # Streamlit App
+st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
+st.title("")
+
+# Mostrar el logo en el centro superior
+try:
+    logo = Image.open(LOGO_FILE)
+    st.image(logo, use_column_width=False, width=200)
+except FileNotFoundError:
+    st.error(f"No se encontró el logo '{LOGO_FILE}'. Asegúrate de que esté en el directorio del repositorio.")
+
 st.title("Generador de Catálogos desde PDF 📄")
 
 # Cargar datos del CSV
