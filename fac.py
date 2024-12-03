@@ -130,7 +130,7 @@ try:
 except FileNotFoundError:
     st.error(f"No se encontró el logo '{LOGO_FILE}'.")
 
-st.title("Generador de Catálogos desde PDF 📄")
+st.title("Tené Todas las Imagenes de los Productos que nos Pediste con un Solo Click! 📄")
 
 # Cargar CSV
 df_productos = cargar_csv()
@@ -149,7 +149,7 @@ if not df_productos.empty:
 
     # Subir PDF
     st.subheader("Subir PDF de Pedido")
-    pdf_file = st.file_uploader("Subir PDF de Pedido", type=["pdf"])
+    pdf_file = st.file_uploader("Subi el PDF que te mandamos de Pedido y dispone de manera automatica de las imagenes para que puedas utilizarlas en tus redes y des a conocer todas las novedades que Adquiriste ", type=["pdf"])
 
     if pdf_file:
         codigos = extraer_codigos(pdf_file)
