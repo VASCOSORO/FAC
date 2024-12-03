@@ -4,8 +4,6 @@ from PyPDF2 import PdfReader
 from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
-import zipfile
-import os
 
 # Ruta del archivo CSV en el repositorio
 CSV_FILE = "1804no.csv"
@@ -15,7 +13,7 @@ LOGO_FILE = "logomundo3.png"
 @st.cache
 def cargar_csv():
     try:
-        return pd.read_csv(CSV_FILE, sep=';', quotechar='"', encoding='latin1')
+        return pd.read_csv(CSV_FILE, sep=';', quotechar='"', encoding='utf-8')
     except FileNotFoundError:
         st.error(f"No se encontró el archivo CSV '{CSV_FILE}'.")
         return pd.DataFrame()  # Devuelve un DataFrame vacío si no se encuentra el archivo
@@ -37,76 +35,72 @@ def extraer_codigos(pdf_file):
         st.error(f"Error al procesar el PDF: {e}")
     return codigos
 
-# Función para generar el catálogo visual
-def generar_catalogo_visual(productos, df_productos):
-    canvas_width, canvas_height = 900, len(productos) * 400 // 3 + 100
-    canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
-    draw = ImageDraw.Draw(canvas)
+# Función para calcular el layout por cantidad de imágenes
+def calcular_layout(n):
+    if n == 1:
+        return [(3, 1)]  # Una imagen al centro
+    elif n == 2:
+        return [(2, 1), (2, 1)]  # Dos imágenes en una columna
+    elif n == 3:
+        return [(3, 1), (3, 1), (1, 1)]  # Una imagen centrada abajo
+    elif n == 4:
+        return [(2, 2)]  # Cuatro imágenes en dos filas
+    elif n == 5:
+        return [(2, 2), (1, 1)]  # Cuatro en cuadrado + una centrada
+    elif n >= 6:
+        return [(2, 3)]  # Seis imágenes distribuidas uniformemente
+    return []
 
-    try:
-        font_title = ImageFont.truetype("arial.ttf", 20)
-        font_text = ImageFont.truetype("arial.ttf", 14)
-    except IOError:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-
-    x, y = 10, 10
-    item_width = canvas_width // 3
-    item_height = 400
-
-    for i, codigo in enumerate(productos):
-        producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
-
-        # Crear espacio para cada producto
-        if pd.notna(producto['imagen']) and producto['imagen'] != '':
-            try:
-                response = requests.get(producto['imagen'], timeout=5)
-                img = Image.open(BytesIO(response.content))
-                img.thumbnail((item_width - 20, item_height - 200))
-                canvas.paste(img, (x + 10, y + 10))
-            except Exception as e:
-                st.error(f"Error al cargar la imagen para el producto {codigo}: {e}")
-
-        # Agregar texto del producto
-        draw.text((x + 10, y + item_height - 150), f"Código: {producto['Codigo']}", fill="black", font=font_text)
-        draw.text((x + 10, y + item_height - 120), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
-
-        x += item_width
-        if x >= canvas_width:
-            x = 10
-            y += item_height
-
-    # Mostrar y permitir descarga del catálogo completo
+# Función para generar el catálogo visual en páginas tipo A4
+def generar_catalogo_visual(productos, df_productos, incluir_datos=True):
+    a4_width, a4_height = 2480, 3508  # Tamaño en píxeles para A4 (300 dpi)
+    max_items_per_page = 6
+    paginas = [productos[i:i + max_items_per_page] for i in range(0, len(productos), max_items_per_page)]
     buffer = BytesIO()
-    canvas.save(buffer, format="PNG")
-    buffer.seek(0)
-    st.image(canvas, caption="Catálogo Visual Generado", use_column_width=True)
-    st.download_button(
-        label="Descargar Catálogo Completo",
-        data=buffer,
-        file_name="catalogo_completo.png",
-        mime="image/png",
-    )
-    return productos
 
-# Función para generar un archivo ZIP con las imágenes del pedido
-def generar_zip_imagenes(productos, df_productos):
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for codigo in productos:
+    # Crear un catálogo multipágina
+    for idx, pagina in enumerate(paginas):
+        canvas = Image.new("RGB", (a4_width, a4_height), "white")
+        draw = ImageDraw.Draw(canvas)
+
+        # Cargar fuentes
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 40)
+            font_text = ImageFont.truetype("arial.ttf", 30)
+        except IOError:
+            font_title = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+
+        layout = calcular_layout(len(pagina))
+        for i, codigo in enumerate(pagina):
             producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
+            row, col = divmod(i, 3)  # Distribuir en filas y columnas
+            item_width, item_height = a4_width // 3, a4_height // 2
+            x, y = col * item_width, row * item_height
+
+            # Descargar y posicionar la imagen
             if pd.notna(producto['imagen']) and producto['imagen'] != '':
                 try:
                     response = requests.get(producto['imagen'], timeout=5)
                     img = Image.open(BytesIO(response.content))
-                    img_buffer = BytesIO()
-                    img.save(img_buffer, format="PNG")
-                    img_buffer.seek(0)
-                    zip_file.writestr(f"{codigo}.png", img_buffer.read())
+                    img.thumbnail((item_width - 50, item_height - 150))
+                    canvas.paste(img, (x + 25, y + 25))
                 except Exception as e:
-                    st.warning(f"No se pudo incluir la imagen del producto {codigo} en el ZIP.")
-    zip_buffer.seek(0)
-    return zip_buffer
+                    st.warning(f"No se pudo cargar la imagen del producto {codigo}.")
+
+            # Agregar datos si están habilitados
+            if incluir_datos:
+                draw.text((x + 25, y + item_height - 100), f"Código: {producto['Codigo']}", fill="black", font=font_text)
+                draw.text((x + 25, y + item_height - 50), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
+
+        # Guardar la página en el buffer
+        pagina_buffer = BytesIO()
+        canvas.save(pagina_buffer, format="PNG")
+        pagina_buffer.seek(0)
+        buffer.write(pagina_buffer.read())
+
+    buffer.seek(0)
+    return buffer
 
 # Streamlit App
 st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
@@ -123,9 +117,6 @@ st.markdown(
         }
         h1, h2, h3, h4, h5, h6 {
             text-align: center;
-        }
-        .css-1aumxhk {
-            justify-content: center;
         }
         footer {
             font-size: 0.75em;
@@ -165,17 +156,21 @@ if not df_productos.empty:
             productos_seleccionados = df_productos[df_productos['Codigo'].isin(codigos)]['Codigo'].tolist()
             if productos_seleccionados:
                 st.success(f"Se encontraron {len(productos_seleccionados)} productos en el CSV.")
-                productos = generar_catalogo_visual(productos_seleccionados, df_productos)
 
-                # Botón para descargar todas las imágenes en un ZIP
-                if productos:
-                    zip_file = generar_zip_imagenes(productos, df_productos)
-                    st.download_button(
-                        label="Descargar Todas las Imágenes",
-                        data=zip_file,
-                        file_name="imagenes_pedido.zip",
-                        mime="application/zip",
-                    )
+                # Elegir si incluir datos o no
+                incluir_datos = st.radio("¿Incluir datos en el catálogo?", ["Sí", "No"]) == "Sí"
+
+                # Generar catálogo visual
+                buffer = generar_catalogo_visual(productos_seleccionados, df_productos, incluir_datos)
+                st.image(buffer, caption="Catálogo Visual Generado", use_column_width=True)
+
+                # Botón para descargar catálogo completo
+                st.download_button(
+                    label="Descargar Catálogo Completo",
+                    data=buffer,
+                    file_name="catalogo_completo.png",
+                    mime="image/png",
+                )
             else:
                 st.warning("No se encontraron productos en el CSV que coincidan con los códigos del PDF.")
         else:
