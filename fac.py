@@ -5,7 +5,8 @@ from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 
-# Cargar el archivo CSV de productos
+
+# Función para cargar el archivo CSV de productos
 @st.cache
 def cargar_datos(csv_file):
     return pd.read_csv(csv_file, sep=';', quotechar='"', encoding='latin1')
@@ -17,86 +18,96 @@ def extraer_codigos(pdf_file):
     for page in reader.pages:
         lines = page.extract_text().splitlines()
         for line in lines:
-            # Buscar líneas que comiencen con un código (formato aproximado)
+            # Buscar líneas que comiencen con un código (modificar si el formato varía)
             if line[:2].isalpha() and '-' in line:
                 codigo = line.split()[0]
                 codigos.append(codigo.strip())
     return codigos
 
-# Generar una imagen para el catálogo
-def generar_imagen(codigo, nombre, precio, descripcion, url_imagen):
+# Función para calcular la distribución del layout
+def calcular_layout(n):
+    if n == 1:
+        return (1, 1)
+    elif n == 2:
+        return (2, 1)
+    elif n <= 4:
+        return (2, 2)
+    elif n <= 6:
+        return (2, 3)
+    else:
+        return ((n // 3) + (n % 3 > 0), 3)  # Máximo 3 columnas
+
+# Generar las imágenes del catálogo
+def generar_catalogo(productos, df_productos):
+    if not productos:
+        st.error("No se encontraron productos para generar el catálogo.")
+        return
+
+    # Crear un canvas para cada grupo de productos
+    layout = calcular_layout(len(productos))
+    canvas_width, canvas_height = 900, layout[0] * 400
+    canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+    draw = ImageDraw.Draw(canvas)
+
+    # Cargar fuentes
     try:
-        # Descargar la imagen del producto
-        response = requests.get(url_imagen)
-        producto_img = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception:
-        # Si falla la descarga, usar una imagen de error
-        producto_img = Image.new("RGB", (300, 300), color=(255, 0, 0))
+        font_title = ImageFont.truetype("arial.ttf", 20)
+        font_text = ImageFont.truetype("arial.ttf", 14)
+    except IOError:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
 
-    # Crear el lienzo para el catálogo
-    img = Image.new("RGB", (800, 400), "white")
-    draw = ImageDraw.Draw(img)
+    item_width = canvas_width // layout[1]
+    item_height = canvas_height // layout[0]
 
-    # Escribir los datos del producto
-    font = ImageFont.load_default()
-    draw.text((10, 10), f"Código: {codigo}", fill="black", font=font)
-    draw.text((10, 30), f"Nombre: {nombre}", fill="black", font=font)
-    draw.text((10, 50), f"Precio: ${precio}", fill="black", font=font)
-    draw.text((10, 70), f"Descripción: {descripcion}", fill="black", font=font)
+    for i, codigo in enumerate(productos):
+        producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
+        row, col = divmod(i, layout[1])
+        x, y = col * item_width, row * item_height
 
-    # Insertar la imagen del producto
-    producto_img = producto_img.resize((300, 300))
-    img.paste(producto_img, (450, 50))
+        # Descargar imagen
+        try:
+            if pd.notna(producto['imagen']) and producto['imagen'] != '':
+                response = requests.get(producto['imagen'], timeout=5)
+                img = Image.open(BytesIO(response.content))
+                img.thumbnail((item_width - 20, item_height - 100))
+                canvas.paste(img, (x + 10, y + 10))
+        except Exception as e:
+            st.error(f"Error al cargar la imagen para el producto {codigo}: {e}")
 
-    return img
+        # Agregar texto (código y nombre)
+        draw.text((x + 10, y + item_height - 80), f"Código: {producto['Codigo']}", fill="black", font=font_text)
+        draw.text((x + 10, y + item_height - 60), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
 
-# App Streamlit
-st.title("Generador de Catálogos desde Pedido PDF 📄")
+    # Mostrar y descargar el catálogo generado
+    buffer = BytesIO()
+    canvas.save(buffer, format="PNG")
+    buffer.seek(0)
+    st.image(canvas, caption="Catálogo Generado", use_column_width=True)
+    st.download_button("Descargar Catálogo", data=buffer, file_name="catalogo.png", mime="image/png")
 
-# Subir archivo PDF
+# Streamlit App
+st.title("Generador de Catálogos desde PDF 📄")
+
+# Subir archivos
+csv_file = st.file_uploader("Subir Archivo CSV de Productos", type=["csv"])
 pdf_file = st.file_uploader("Subir PDF de Pedido", type=["pdf"])
 
-# Subir archivo CSV
-csv_file = st.file_uploader("Subir Archivo CSV de Productos", type=["csv"])
-
-if pdf_file and csv_file:
-    # Cargar datos
+if csv_file and pdf_file:
     st.info("Cargando datos del CSV...")
     df_productos = cargar_datos(csv_file)
 
-    # Extraer códigos
     st.info("Extrayendo códigos del PDF...")
     codigos = extraer_codigos(pdf_file)
 
     if codigos:
-        st.success(f"{len(codigos)} códigos extraídos con éxito.")
+        st.success(f"Se extrajeron {len(codigos)} códigos del PDF.")
+        productos_seleccionados = df_productos[df_productos['Codigo'].isin(codigos)]['Codigo'].tolist()
 
-        # Filtrar los productos que coinciden con los códigos
-        st.info("Filtrando productos en el catálogo...")
-        catalogo = df_productos[df_productos['Codigo'].isin(codigos)]
-
-        if not catalogo.empty:
-            st.success(f"Se encontraron {len(catalogo)} productos en el catálogo.")
-
-            # Generar imágenes para los productos seleccionados
-            st.info("Generando catálogo...")
-            
-            cols = st.columns(3)  # Distribuir en 3 columnas por fila
-            col_idx = 0
-            for _, row in catalogo.iterrows():
-                img = generar_imagen(
-                    codigo=row['Codigo'],
-                    nombre=row['Nombre'],
-                    precio=row['Precio'],
-                    descripcion=row['Descripcion'],
-                    url_imagen=row['imagen'],
-                )
-                # Mostrar la imagen generada en una columna
-                with cols[col_idx]:
-                    st.image(img, caption=row['Nombre'], use_column_width=True)
-                col_idx = (col_idx + 1) % 3  # Moverse a la siguiente columna
-
+        if productos_seleccionados:
+            st.success(f"Se encontraron {len(productos_seleccionados)} productos en el CSV.")
+            generar_catalogo(productos_seleccionados, df_productos)
         else:
-            st.error("No se encontraron productos que coincidan con los códigos extraídos.")
+            st.error("No se encontraron coincidencias entre los códigos del PDF y el CSV.")
     else:
         st.error("No se pudieron extraer códigos válidos del PDF.")
