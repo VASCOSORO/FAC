@@ -17,7 +17,7 @@ def cargar_csv():
         return pd.read_csv(CSV_FILE, sep=';', quotechar='"', encoding='utf-8')
     except FileNotFoundError:
         st.error(f"No se encontró el archivo CSV '{CSV_FILE}'.")
-        return pd.DataFrame()  # Devuelve un DataFrame vacío si no se encuentra el archivo
+        return pd.DataFrame()
 
 # Función para extraer códigos de productos desde un PDF
 def extraer_codigos(pdf_file):
@@ -27,7 +27,7 @@ def extraer_codigos(pdf_file):
         for page in reader.pages:
             lines = page.extract_text().splitlines()
             for line in lines:
-                if line[:2].isalpha() and '-' in line:  # Modificar si el formato varía
+                if line[:2].isalpha() and '-' in line:
                     codigo = line.split()[0]
                     codigos.append(codigo.strip())
         if not codigos:
@@ -36,9 +36,9 @@ def extraer_codigos(pdf_file):
         st.error(f"Error al procesar el PDF: {e}")
     return codigos
 
-# Función para generar el catálogo visual en páginas tipo A4
-def generar_catalogo_visual(productos, df_productos, incluir_datos=True):
-    a4_width, a4_height = 1240, 1754  # Tamaño reducido para visualización tipo A4
+# Función para generar el catálogo en formato A4 vertical
+def generar_catalogo_a4(productos, df_productos):
+    a4_width, a4_height = 1240, 1754  # Tamaño en píxeles para A4
     max_items_per_page = 6
     paginas = [productos[i:i + max_items_per_page] for i in range(0, len(productos), max_items_per_page)]
     catalogo_buffers = []
@@ -50,33 +50,31 @@ def generar_catalogo_visual(productos, df_productos, incluir_datos=True):
         # Fuentes
         try:
             font_title = ImageFont.truetype("arial.ttf", 28)
-            font_text = ImageFont.truetype("arial.ttf", 20)
+            font_text = ImageFont.truetype("arial.ttf", 24)
         except IOError:
             font_title = ImageFont.load_default()
             font_text = ImageFont.load_default()
 
-        x_offset, y_offset = 20, 20
-        col_width, row_height = a4_width // 3, a4_height // 2
-
+        # Posicionamiento
+        col_width, row_height = a4_width // 2, a4_height // 3  # Dos columnas, tres filas
         for i, codigo in enumerate(pagina):
             producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
-            col, row = i % 3, i // 3
-            x, y = col * col_width + x_offset, row * row_height + y_offset
+            col, row = i % 2, i // 2
+            x, y = col * col_width, row * row_height
 
             # Descargar y posicionar la imagen
             if pd.notna(producto['imagen']) and producto['imagen'] != '':
                 try:
                     response = requests.get(producto['imagen'], timeout=5)
                     img = Image.open(BytesIO(response.content))
-                    img.thumbnail((col_width - 40, row_height - 100))
+                    img.thumbnail((col_width - 40, row_height - 120))
                     canvas.paste(img, (x + 20, y + 20))
                 except Exception as e:
                     st.warning(f"No se pudo cargar la imagen del producto {codigo}.")
 
-            # Agregar datos
-            if incluir_datos:
-                draw.text((x + 20, y + row_height - 70), f"Código: {producto['Codigo']}", fill="black", font=font_text)
-                draw.text((x + 20, y + row_height - 40), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
+            # Agregar texto
+            draw.text((x + 20, y + row_height - 90), producto['Nombre'][:30], fill="black", font=font_text)
+            draw.text((x + 20, y + row_height - 50), f"Código: {producto['Codigo']}", fill="black", font=font_text)
 
         buffer = BytesIO()
         canvas.save(buffer, format="PNG")
@@ -144,30 +142,21 @@ if not df_productos.empty:
         if codigos:
             productos_seleccionados = df_productos[df_productos['Codigo'].isin(codigos)]['Codigo'].tolist()
             if productos_seleccionados:
-                incluir_datos = st.radio("¿Incluir datos en el catálogo?", ["Sí", "No"]) == "Sí"
-                catalogo_buffers = generar_catalogo_visual(productos_seleccionados, df_productos, incluir_datos)
+                catalogo_buffers = generar_catalogo_a4(productos_seleccionados, df_productos)
 
-                # Mostrar el catálogo
+                # Mostrar el catálogo y permitir descarga individual
                 for idx, buffer in enumerate(catalogo_buffers):
                     st.image(buffer, caption=f"Página {idx + 1}", use_column_width=True)
-
-                # Descargar todo el catálogo
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-                    for idx, buffer in enumerate(catalogo_buffers):
-                        buffer.seek(0)
-                        zip_file.writestr(f"pagina_{idx + 1}.png", buffer.read())
-                zip_buffer.seek(0)
-                st.download_button(
-                    label="Descargar Catálogo Completo (ZIP)",
-                    data=zip_buffer,
-                    file_name="catalogo_completo.zip",
-                    mime="application/zip",
-                )
+                    st.download_button(
+                        label=f"Descargar Página {idx + 1}",
+                        data=buffer.getvalue(),
+                        file_name=f"catalogo_pagina_{idx + 1}.png",
+                        mime="image/png",
+                    )
 
                 # Descargar imágenes individuales
                 st.download_button(
-                    label="Descargar Todas las Imágenes (ZIP)",
+                    label="Descargar Todas las Imágenes del Pedido (ZIP)",
                     data=generar_zip_imagenes(productos_seleccionados, df_productos),
                     file_name="imagenes_pedido.zip",
                     mime="application/zip",
