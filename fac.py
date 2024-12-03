@@ -76,7 +76,27 @@ def generar_catalogo(productos, df_productos):
 
 # Streamlit App
 st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
-st.title("")
+
+# Centrar todo el contenido
+st.markdown(
+    """
+    <style>
+        .block-container {
+            text-align: center;
+        }
+        img {
+            margin-bottom: 20px;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            text-align: center;
+        }
+        .css-1aumxhk {
+            justify-content: center;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Mostrar el logo en el centro superior
 try:
@@ -92,6 +112,7 @@ df_productos = cargar_csv()
 
 if not df_productos.empty:
     # Subir archivo PDF
+    st.subheader("Subir PDF de Pedido")
     pdf_file = st.file_uploader("Subir PDF de Pedido", type=["pdf"])
 
     if pdf_file:
