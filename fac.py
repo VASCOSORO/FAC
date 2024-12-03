@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 from PyPDF2 import PdfReader
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 
@@ -18,21 +18,90 @@ def cargar_csv():
         st.error(f"No se encontró el archivo CSV '{CSV_FILE}'.")
         return pd.DataFrame()  # Devuelve un DataFrame vacío si no se encuentra el archivo
 
+# Función para extraer códigos de productos desde un PDF
+def extraer_codigos(pdf_file):
+    codigos = []
+    try:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages:
+            lines = page.extract_text().splitlines()
+            for line in lines:
+                if line[:2].isalpha() and '-' in line:  # Modificar si el formato varía
+                    codigo = line.split()[0]
+                    codigos.append(codigo.strip())
+        if not codigos:
+            st.warning("No se encontraron códigos válidos en el PDF.")
+    except Exception as e:
+        st.error(f"Error al procesar el PDF: {e}")
+    return codigos
+
+# Función para generar imágenes individuales de productos
+def generar_catalogo(productos, df_productos):
+    if not productos:
+        st.error("No se encontraron productos para generar el catálogo.")
+        return
+
+    for codigo in productos:
+        producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
+
+        # Crear una imagen individual para cada producto
+        canvas_width, canvas_height = 400, 600
+        canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+        draw = ImageDraw.Draw(canvas)
+
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 20)
+            font_text = ImageFont.truetype("arial.ttf", 14)
+        except IOError:
+            font_title = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+
+        try:
+            # Descargar la imagen del producto
+            if pd.notna(producto['imagen']) and producto['imagen'] != '':
+                response = requests.get(producto['imagen'], timeout=5)
+                img = Image.open(BytesIO(response.content))
+                img.thumbnail((canvas_width - 20, canvas_height - 200))
+                canvas.paste(img, (10, 10))
+        except Exception as e:
+            st.error(f"Error al cargar la imagen para el producto {codigo}: {e}")
+
+        # Agregar texto del producto
+        draw.text((10, canvas_height - 180), f"Código: {producto['Codigo']}", fill="black", font=font_text)
+        draw.text((10, canvas_height - 150), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
+
+        # Guardar la imagen en un buffer
+        buffer = BytesIO()
+        canvas.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        # Mostrar y permitir descarga de la imagen individual
+        st.image(canvas, caption=f"Producto: {producto['Nombre']}", use_column_width=False)
+        st.download_button(
+            label=f"Descargar {producto['Codigo']}",
+            data=buffer,
+            file_name=f"{producto['Codigo']}.png",
+            mime="image/png",
+        )
+
 # Streamlit App
 st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
 
-# CSS para centrar el logo
+# CSS para centrar todo el contenido
 st.markdown(
     """
     <style>
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 20px;
-        }
         .block-container {
             text-align: center;
+        }
+        img {
+            margin-bottom: 20px;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            text-align: center;
+        }
+        .css-1aumxhk {
+            justify-content: center;
         }
         footer {
             font-size: 0.75em;
@@ -54,7 +123,6 @@ except FileNotFoundError:
     st.error(f"No se encontró el logo '{LOGO_FILE}'. Asegúrate de que esté en el directorio del repositorio.")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Título centrado
 st.title("Generador de Catálogos desde PDF 📄")
 
 # Cargar datos del CSV
@@ -67,7 +135,17 @@ if not df_productos.empty:
 
     if pdf_file:
         st.success("¡Archivo PDF cargado con éxito!")
-        # Aquí se puede implementar la lógica de extracción y generación de catálogos
+        codigos = extraer_codigos(pdf_file)
+
+        if codigos:
+            productos_seleccionados = df_productos[df_productos['Codigo'].isin(codigos)]['Codigo'].tolist()
+            if productos_seleccionados:
+                st.success(f"Se encontraron {len(productos_seleccionados)} productos en el CSV.")
+                generar_catalogo(productos_seleccionados, df_productos)
+            else:
+                st.warning("No se encontraron productos en el CSV que coincidan con los códigos del PDF.")
+        else:
+            st.warning("No se extrajeron códigos válidos del PDF.")
 
 # Footer fino
 st.markdown(
