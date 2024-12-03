@@ -37,7 +37,7 @@ def extraer_codigos(pdf_file):
     return codigos
 
 # Función para generar el catálogo en formato A4 vertical
-def generar_catalogo_a4(productos, df_productos):
+def generar_catalogo_a4(productos, df_productos, incluir_datos=True):
     a4_width, a4_height = 1240, 1754  # Tamaño en píxeles para A4
     max_items_per_page = 6
     paginas = [productos[i:i + max_items_per_page] for i in range(0, len(productos), max_items_per_page)]
@@ -72,9 +72,10 @@ def generar_catalogo_a4(productos, df_productos):
                 except Exception as e:
                     st.warning(f"No se pudo cargar la imagen del producto {codigo}.")
 
-            # Agregar texto
-            draw.text((x + 20, y + row_height - 90), producto['Nombre'][:30], fill="black", font=font_text)
-            draw.text((x + 20, y + row_height - 50), f"Código: {producto['Codigo']}", fill="black", font=font_text)
+            # Agregar datos (si está habilitado)
+            if incluir_datos:
+                draw.text((x + 20, y + row_height - 90), producto['Nombre'][:30], fill="black", font=font_text)
+                draw.text((x + 20, y + row_height - 50), f"Código: {producto['Codigo']}", fill="black", font=font_text)
 
         buffer = BytesIO()
         canvas.save(buffer, format="PNG")
@@ -102,7 +103,7 @@ def generar_zip_imagenes(productos, df_productos):
     return zip_buffer
 
 # Streamlit App
-st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
+st.set_page_config(page_title="Subi Tu Pedido y dispone de las Imagenes", page_icon="📄", layout="wide")
 
 # CSS para centrar contenido
 st.markdown(
@@ -135,6 +136,19 @@ st.title("Generador de Catálogos desde PDF 📄")
 df_productos = cargar_csv()
 
 if not df_productos.empty:
+    # Sección para actualizar CSV
+    with st.expander("Actualizar Archivo CSV"):
+        contraseña = st.text_input("Ingrese la contraseña para actualizar el archivo CSV", type="password")
+        if contraseña == "Rosebud":
+            archivo_csv = st.file_uploader("Subir nuevo archivo CSV", type=["csv"])
+            if archivo_csv:
+                with open(CSV_FILE, "wb") as f:
+                    f.write(archivo_csv.read())
+                st.success("Archivo CSV actualizado correctamente.")
+                st.experimental_rerun()
+
+    # Subir PDF
+    st.subheader("Subir PDF de Pedido")
     pdf_file = st.file_uploader("Subir PDF de Pedido", type=["pdf"])
 
     if pdf_file:
@@ -142,7 +156,11 @@ if not df_productos.empty:
         if codigos:
             productos_seleccionados = df_productos[df_productos['Codigo'].isin(codigos)]['Codigo'].tolist()
             if productos_seleccionados:
-                catalogo_buffers = generar_catalogo_a4(productos_seleccionados, df_productos)
+                # Elegir si incluir datos en el catálogo
+                incluir_datos = st.radio("¿Incluir datos en el catálogo?", ["Sí", "No"]) == "Sí"
+
+                # Generar catálogo
+                catalogo_buffers = generar_catalogo_a4(productos_seleccionados, df_productos, incluir_datos)
 
                 # Mostrar el catálogo y permitir descarga individual
                 for idx, buffer in enumerate(catalogo_buffers):
