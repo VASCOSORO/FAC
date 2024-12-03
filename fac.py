@@ -30,49 +30,54 @@ def extraer_codigos(pdf_file):
                 codigos.append(codigo.strip())
     return codigos
 
-# Función para generar el catálogo
+# Función para generar el catálogo con descarga individual
 def generar_catalogo(productos, df_productos):
     if not productos:
         st.error("No se encontraron productos para generar el catálogo.")
         return
 
-    layout = (len(productos) // 3 + (len(productos) % 3 > 0), 3)
-    canvas_width, canvas_height = 900, layout[0] * 400
-    canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
-    draw = ImageDraw.Draw(canvas)
-
-    try:
-        font_title = ImageFont.truetype("arial.ttf", 20)
-        font_text = ImageFont.truetype("arial.ttf", 14)
-    except IOError:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-
-    item_width = canvas_width // layout[1]
-    item_height = canvas_height // layout[0]
-
-    for i, codigo in enumerate(productos):
+    for codigo in productos:
         producto = df_productos[df_productos['Codigo'] == codigo].iloc[0]
-        row, col = divmod(i, layout[1])
-        x, y = col * item_width, row * item_height
+
+        # Crear una imagen individual para cada producto
+        canvas_width, canvas_height = 400, 600
+        canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+        draw = ImageDraw.Draw(canvas)
 
         try:
+            font_title = ImageFont.truetype("arial.ttf", 20)
+            font_text = ImageFont.truetype("arial.ttf", 14)
+        except IOError:
+            font_title = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+
+        try:
+            # Descargar la imagen del producto
             if pd.notna(producto['imagen']) and producto['imagen'] != '':
                 response = requests.get(producto['imagen'], timeout=5)
                 img = Image.open(BytesIO(response.content))
-                img.thumbnail((item_width - 20, item_height - 100))
-                canvas.paste(img, (x + 10, y + 10))
+                img.thumbnail((canvas_width - 20, canvas_height - 200))
+                canvas.paste(img, (10, 10))
         except Exception as e:
             st.error(f"Error al cargar la imagen para el producto {codigo}: {e}")
 
-        draw.text((x + 10, y + item_height - 80), f"Código: {producto['Codigo']}", fill="black", font=font_text)
-        draw.text((x + 10, y + item_height - 60), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
+        # Agregar texto del producto
+        draw.text((10, canvas_height - 180), f"Código: {producto['Codigo']}", fill="black", font=font_text)
+        draw.text((10, canvas_height - 150), f"Nombre: {producto['Nombre'][:30]}...", fill="black", font=font_text)
 
-    buffer = BytesIO()
-    canvas.save(buffer, format="PNG")
-    buffer.seek(0)
-    st.image(canvas, caption="Catálogo Generado", use_column_width=True)
-    st.download_button("Descargar Catálogo", data=buffer, file_name="catalogo.png", mime="image/png")
+        # Guardar la imagen en un buffer
+        buffer = BytesIO()
+        canvas.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        # Mostrar y permitir descarga de la imagen individual
+        st.image(canvas, caption=f"Producto: {producto['Nombre']}", use_column_width=False)
+        st.download_button(
+            label=f"Descargar {producto['Codigo']}",
+            data=buffer,
+            file_name=f"{producto['Codigo']}.png",
+            mime="image/png",
+        )
 
 # Streamlit App
 st.set_page_config(page_title="Generador de Catálogos", page_icon="📄", layout="wide")
@@ -92,6 +97,12 @@ st.markdown(
         }
         .css-1aumxhk {
             justify-content: center;
+        }
+        footer {
+            font-size: 0.75em;
+            text-align: center;
+            color: gray;
+            margin-top: 50px;
         }
     </style>
     """,
@@ -141,3 +152,13 @@ with st.expander("⚙️ Opciones Avanzadas", expanded=False):
                 st.success("Archivo CSV actualizado exitosamente. Recarga la página para aplicar los cambios.")
         elif contraseña:
             st.error("Contraseña incorrecta.")
+
+# Footer fino
+st.markdown(
+    """
+    <footer>
+        Powered by Vasco.Soro
+    </footer>
+    """,
+    unsafe_allow_html=True,
+)
